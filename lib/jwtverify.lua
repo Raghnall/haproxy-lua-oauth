@@ -5,6 +5,7 @@
 -- Copyright (c) 2019. Baptiste Assmann <bassmann@haproxy.com>
 -- Copyright (c) 2019. Nick Ramirez <nramirez@haproxy.com>
 -- Copyright (c) 2019. HAProxy Technologies LLC
+-- Copyright (c) 2021. Michael G. Fronk <raghnallmordecai@gmail.com>
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -27,7 +28,10 @@ if not config then
       publicKey = nil,
       issuer = nil,
       audience = nil,
-      hmacSecret = nil
+      hmacSecret = nil,
+      issuers = {},
+      publicKeys = {},
+      hmacSecrets = {}
   }
 end
 
@@ -126,22 +130,64 @@ local function algorithmIsValid(token)
   return true
 end
 
-local function rs256SignatureIsValid(token, publicKey)
-  local digest = openssl.digest.new('SHA256')
+local function findIdx (tab, val)
+  for index, value in ipairs(tab) do
+      if value == val then
+          return index
+      end
+  end
+  return 0
+end
+
+
+local function publickKeySignatureIsValid(token, digestAlg)
+  local publicKey = nil
+  local issuers = config.issuers
+  local publicKeys = config.publicKeys
+  local issuerIdx = findIdx(issuers, token.payloaddecoded.iss)
+  -- get the public key with the same index
+  if issuerIdx > 0 and issuerIdx <= #publicKeys then
+    publicKey = publicKeys[issuerIdx]
+  end
+
+  -- if nil, then set to global/default public key
+  if publicKey == nil then
+    publicKey = config.publicKey
+  end
+
+  -- if still nil, then return false
+  if publicKey == nil then
+    return false
+  end
+  
+  local digest = openssl.digest.new(digestAlg)
   digest:update(token.header .. '.' .. token.payload)
   local vkey = openssl.pkey.new(publicKey)
   local isVerified = vkey:verify(token.signaturedecoded, digest)
   return isVerified
 end
 
-local function hs256SignatureIsValid(token, secret)
-  local hmac = openssl.hmac.new(secret, 'SHA256')
-  local checksum = hmac:final(token.header .. '.' .. token.payload)
-  return checksum == token.signaturedecoded
-end
+local function hmacSignatureIsValid(token, hmacAlg)
+  local hmacSecret = nil
+  local issuers = config.issuers
+  local hmacSecrets = config.hmacSecrets
+  local issuerIdx = findIdx(issuers, token.payloaddecoded.iss)
+  -- get the hmac secret with the same index
+  if issuerIdx > 0 and issuerIdx <= #hmacSecrets then
+    hmacSecret = hmacSecrets[issuerIdx]
+  end
 
-local function hs512SignatureIsValid(token, secret)
-  local hmac = openssl.hmac.new(secret, 'SHA512')
+  -- if nil, then set to global/default hmac secret
+  if hmacSecret == nil then
+    hmacSecret = config.hmacSecret
+  end
+
+  -- if still nil, then return false
+  if hmacSecret == nil then
+    return false
+  end
+
+  local hmac = openssl.hmac.new(hmacSecret, hmacAlg)
   local checksum = hmac:final(token.header .. '.' .. token.payload)
   return checksum == token.signaturedecoded
 end
@@ -150,8 +196,11 @@ local function expirationIsValid(token)
   return os.difftime(token.payloaddecoded.exp, core.now().sec) > 0
 end
 
-local function issuerIsValid(token, expectedIssuer)
-  return token.payloaddecoded.iss == expectedIssuer
+local function issuerIsValid(token)
+  local issuer = config.issuer
+  local issuers = config.issuers
+  local issuerIdx = findIdx(issuers, token.payloaddecoded.iss)
+  return issuerIdx > 0 or issuer == nil or token.payloaddecoded.iss == issuer
 end
 
 -- Checks if the audience in the token is listed in the
@@ -191,8 +240,10 @@ local function setVariablesFromPayload(txn, decodedPayload)
 end
 
 local function jwtverify(txn)
+  local next = next 
   local pem = config.publicKey
   local issuer = config.issuer
+  local issuers = config.issuers
   local audience = config.audience
   local hmacSecret = config.hmacSecret
 
@@ -215,17 +266,17 @@ local function jwtverify(txn)
 
   -- 3. Verify the signature with the certificate
   if token.headerdecoded.alg == 'RS256' then
-    if rs256SignatureIsValid(token, pem) == false then
+    if publickKeySignatureIsValid(token, 'SHA256') == false then
       log("Signature not valid.")
       goto out
     end
   elseif token.headerdecoded.alg == 'HS256' then
-    if hs256SignatureIsValid(token, hmacSecret) == false then
+    if hmacSignatureIsValid(token, 'SHA256')  == false then
       log("Signature not valid.")
       goto out
     end
   elseif token.headerdecoded.alg == 'HS512' then
-    if hs512SignatureIsValid(token, hmacSecret) == false then
+    if hmacSignatureIsValid(token, 'SHA512')  == false then
       log("Signature not valid.")
       goto out
     end
@@ -238,7 +289,7 @@ local function jwtverify(txn)
   end
 
   -- 5. Verify the issuer
-  if issuer ~= nil and issuerIsValid(token, issuer) == false then
+  if (issuer ~= nil or next(issuers) ~= nil) and issuerIsValid(token) == false then
     log("Issuer not valid.")
     goto out
   end
@@ -269,14 +320,32 @@ core.register_init(function()
   config.audience = os.getenv("OAUTH_AUDIENCE")
   
   -- when using an RS256 signature
-  local publicKeyPath = os.getenv("OAUTH_PUBKEY_PATH") 
-  local pem = readAll(publicKeyPath)
-  config.publicKey = pem
+  config.publicKey = os.getenv("OAUTH_PUBKEY")
   
   -- when using an HS256 or HS512 signature
   config.hmacSecret = os.getenv("OAUTH_HMAC_SECRET")
   
-  log("PublicKeyPath: " .. publicKeyPath)
+  -- Multiple Issuers w/massociated pubkey and/or secret
+  -- Note that issuers, publickKeys, and hmacScrets should all have the same number of entries
+  -- Decode Issuers to an array
+  local issuers = config.issuers
+  for issuer in os.getenv("OAUTH_ISSUERS"):gmatch("([^,]+)") do 
+    issuers[#issuers + 1] = issuer:gsub("^%s*(.-)%s*$", "%1")
+  end
+
+  -- Decode publicKeys to an array
+  local publicKeys = config.publicKeys
+  for publicKey in os.getenv("OAUTH_PUBKEYS"):gmatch("([^,]+)") do 
+    publicKeys[#publicKeys + 1] = publicKey:gsub("^%s*(.-)%s*$", "%1")
+  end
+
+  -- Decode hmacSecrets to an array
+  local hmacSecrets = config.hmacSecrets
+  for hmacSecret in os.getenv("OAUTH_HMAC_SECRETS"):gmatch("([^,]+)") do 
+    hmacSecrets[#hmacSecrets + 1] = hmacSecret:gsub("^%s*(.-)%s*$", "%1")
+  end
+
+  log("PublicKey: " .. (config.publicKey or "<none>"))
   log("Issuer: " .. (config.issuer or "<none>"))
   log("Audience: " .. (config.audience or "<none>"))
 end)
