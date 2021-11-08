@@ -323,26 +323,29 @@ core.register_init(function()
     -- Get associated Public Keys and HMAC Secrets
     local publicKeys = {}
     local hmacSecrets = {}
+    local envVarName = ""
+    local envVarValue = ""
+    local envVarTokens = {}
     for issuerIndex, issuer in ipairs(issuers) do
       -- Get Public Key by Issuer Index
-      local envVarName = string.format("OAUTH_PUBKEYS_%d", issuerIndex)
-      local envVar = os.getenv(envVarName)
-      if type(envVar) == "string" then
+      envVarName = string.format("OAUTH_PUBKEYS_%d", issuerIndex)
+      envVarValue = os.getenv(envVarName)
+      if type(envVarValue) == "string" then
         -- remove leading and trailing spaces
-        envVar = envVar:gsub("^%s*(.-)%s*$", "%1")
+        envVarValue = envVarValue:gsub("^%s*(.-)%s*$", "%1")
         -- Check if we have a list of KeyIds or just a single Public Key
-        envVar = core.tokenize(oauthIssuers, " ")
-        if (#envVar == 1) then -- if only a single item, assume that we have a Public Key
-          publicKeys[issuer] = envVar[1]
+        envVarTokens = core.tokenize(oauthIssuers, " ")
+        if (#envVarTokens == 1) then -- if only a single item, assume that we have a Public Key
+          publicKeys[issuer] = envVarTokens[1]
         else -- If multiple items, assmue we have a list of keys
           publicKeys[issuer] = {}
-          for keyIdx, keyId in ipairs(envVar) do
+          for keyIndex, keyId in ipairs(envVarTokens) do
             -- Look for the keyId in the environment variable for the issuer
-            envVarName = string.format("OAUTH_PUBKEYS_%d_%d", issuerIndex, keyIdx)
-            envVar = os.getenv(envVarName)
-            if type(envVar) == "string" then
-              envVar = envVar:gsub("^%s*(.-)%s*$", "%1")
-              publicKeys[issuer][keyId] = envVar
+            envVarName = string.format("OAUTH_PUBKEYS_%d_%d", issuerIndex, keyIndex)
+            envVarValue = os.getenv(envVarName)
+            if type(envVarValue) == "string" then
+              envVarValue = envVarValue:gsub("^%s*(.-)%s*$", "%1")
+              publicKeys[issuer][keyId] = envVarValue
             end
           end
         end
@@ -350,9 +353,9 @@ core.register_init(function()
 
       -- Get HMAC Secrete by Issuer Index
       envVarName = string.format("OAUTH_HMAC_SECRETS_%d" ,issuerIndex)
-      envVar = os.getenv(envVarName)
-      if type(envVar) == "string" then
-        hmacSecrets[issuer] = envVar:gsub("^%s*(.-)%s*$", "%1")
+      envVarValue = os.getenv(envVarName)
+      if type(envVarValue) == "string" then
+        hmacSecrets[issuer] = envVarValue:gsub("^%s*(.-)%s*$", "%1")
       end
     end
 
