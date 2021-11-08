@@ -134,6 +134,11 @@ local function publickKeySignatureIsValid(token, digestAlg)
   local publicKeys = config.publicKeys
   local publicKey = publicKeys[token.payloaddecoded.iss]
 
+  -- if publicKey is a table, we have to check for the specific key id (kid)
+  if type(publicKey) == "table" then
+    publicKey = publicKey[token.headerdecoded.kid]
+  end
+
   -- if nil, then set to global/default public key
   if publicKey == nil then
     publicKey = config.publicKey
@@ -314,14 +319,31 @@ core.register_init(function()
     local hmacSecrets = {}
     for index, issuer in ipairs(issuers) do
       -- Get Public Key by Issuer Index
-      local envVarName = string.format("OAUTH_PUBKEYS[%d]",index)
+      local envVarName = string.format("OAUTH_PUBKEYS_%d",index)
       local envVar = os.getenv(envVarName)
       if type(envVar) == "string" then
-        publicKeys[issuer] = envVar:gsub("^%s*(.-)%s*$", "%1")
+        -- remove leading and trailing spaces
+        envVar = envVar:gsub("^%s*(.-)%s*$", "%1")
+        -- Check if we have a list of KeyIds or just a single Public Key
+        envVar = core.tokenize(oauthIssuers, " ")
+        if (#envVar == 1) then -- if only a single item, assume that we have a Public Key
+          publicKeys[issuer] = envVar[1]
+        else -- If multiple items, assmue we have a list of keys
+          publicKeys[issuer] = {}
+          for keyIdx, keyId in ipairs(envVar) do
+            -- Look for the keyId in the environment variable for the issuer
+            envVarName = string.format("OAUTH_PUBKEYS_%d_%d", issuer, keyIdx)
+            envVar = os.getenv(envVarName)
+            if type(envVar) == "string" then
+              envVar = envVar:gsub("^%s*(.-)%s*$", "%1")
+              publicKeys[issuer][keyId] = envVar
+            end
+          end
+        end
       end
 
       -- Get HMAC Secrete by Issuer Index
-      envVarName = string.format("OAUTH_HMAC_SECRETS[%d]",index)
+      envVarName = string.format("OAUTH_HMAC_SECRETS_%d",index)
       envVar = os.getenv(envVarName)
       if type(envVar) == "string" then
         hmacSecrets[issuer] = envVar:gsub("^%s*(.-)%s*$", "%1")
