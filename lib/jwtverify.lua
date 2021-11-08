@@ -334,7 +334,7 @@ core.register_init(function()
         -- remove leading and trailing spaces
         envVarValue = envVarValue:gsub("^%s*(.-)%s*$", "%1")
         -- Check if we have a list of KeyIds or just a single Public Key
-        envVarTokens = core.tokenize(oauthIssuers, " ")
+        envVarTokens = core.tokenize(envVarValue, " ")
         if (#envVarTokens == 1) then -- if only a single item, assume that we have a Public Key
           publicKeys[issuer] = envVarTokens[1]
         else -- If multiple items, assmue we have a list of keys
