@@ -151,7 +151,7 @@ local function publickKeySignatureIsValid(token, digestAlg)
   
   local digest = openssl.digest.new(digestAlg)
   digest:update(token.header .. '.' .. token.payload)
-  local vkey = openssl.pkey.new(publicKey)
+  local vkey = openssl.pkey.new("-----BEGIN PUBLIC KEY-----\n" .. publicKey .. "\n-----END PUBLIC KEY-----")
   local isVerified = vkey:verify(token.signaturedecoded, digest)
   return isVerified
 end
