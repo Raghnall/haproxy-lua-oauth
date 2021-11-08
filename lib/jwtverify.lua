@@ -131,19 +131,17 @@ local function algorithmIsValid(token)
 end
 
 local function publickKeySignatureIsValid(token, digestAlg)
-  log('Decoded JWT ISS: ' .. dump(token.payloaddecoded.iss))
+  log('JWT ISS: ' .. dump(token.payloaddecoded.iss))
   local publicKeys = config.publicKeys
   local publicKey = publicKeys[token.payloaddecoded.iss]
 
-
-  log('Decoded PublicKey(s) by ISS-1: ' .. dump(publicKey))
+  log('PublicKey(s) by ISS: ' .. dump(publicKey))
 
   -- if publicKey is a table, we have to check for the specific key id (kid)
   if type(publicKey) == "table" then
     publicKey = publicKey[token.headerdecoded.kid]
+    log('PublicKey by ISS & KID: ' .. dump(publicKey))
   end
-
-  log('Decoded PublicKey(s) by ISS-2: ' .. dump(publicKey))
 
   -- if nil, then set to global/default public key
   if publicKey == nil then
