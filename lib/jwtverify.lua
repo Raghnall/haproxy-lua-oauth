@@ -317,9 +317,9 @@ core.register_init(function()
     -- Get associated Public Keys and HMAC Secrets
     local publicKeys = {}
     local hmacSecrets = {}
-    for index, issuer in ipairs(issuers) do
+    for issuerIndex, issuer in ipairs(issuers) do
       -- Get Public Key by Issuer Index
-      local envVarName = string.format("OAUTH_PUBKEYS_%d",index)
+      local envVarName = string.format("OAUTH_PUBKEYS_%d", issuerIndex)
       local envVar = os.getenv(envVarName)
       if type(envVar) == "string" then
         -- remove leading and trailing spaces
@@ -332,7 +332,7 @@ core.register_init(function()
           publicKeys[issuer] = {}
           for keyIdx, keyId in ipairs(envVar) do
             -- Look for the keyId in the environment variable for the issuer
-            envVarName = string.format("OAUTH_PUBKEYS_%d_%d", issuer, keyIdx)
+            envVarName = string.format("OAUTH_PUBKEYS_%d_%d", issuerIndex, keyIdx)
             envVar = os.getenv(envVarName)
             if type(envVar) == "string" then
               envVar = envVar:gsub("^%s*(.-)%s*$", "%1")
@@ -343,7 +343,7 @@ core.register_init(function()
       end
 
       -- Get HMAC Secrete by Issuer Index
-      envVarName = string.format("OAUTH_HMAC_SECRETS_%d",index)
+      envVarName = string.format("OAUTH_HMAC_SECRETS_%d" ,issuerIndex)
       envVar = os.getenv(envVarName)
       if type(envVar) == "string" then
         hmacSecrets[issuer] = envVar:gsub("^%s*(.-)%s*$", "%1")
