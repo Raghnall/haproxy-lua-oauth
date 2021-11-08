@@ -29,9 +29,9 @@ if not config then
       issuer = nil,
       audience = nil,
       hmacSecret = nil,
-      issuers = {},
-      publicKeys = {},
-      hmacSecrets = {}
+      issuers = nil,
+      publicKeys = nil,
+      hmacSecrets = nil
   }
 end
 
@@ -130,25 +130,9 @@ local function algorithmIsValid(token)
   return true
 end
 
-local function findIdx (tab, val)
-  for index, value in ipairs(tab) do
-      if value == val then
-          return index
-      end
-  end
-  return 0
-end
-
-
 local function publickKeySignatureIsValid(token, digestAlg)
-  local publicKey = nil
-  local issuers = config.issuers
   local publicKeys = config.publicKeys
-  local issuerIdx = findIdx(issuers, token.payloaddecoded.iss)
-  -- get the public key with the same index
-  if issuerIdx > 0 and issuerIdx <= #publicKeys then
-    publicKey = publicKeys[issuerIdx]
-  end
+  local publicKey = publicKeys[token.payloaddecoded.iss]
 
   -- if nil, then set to global/default public key
   if publicKey == nil then
@@ -168,15 +152,9 @@ local function publickKeySignatureIsValid(token, digestAlg)
 end
 
 local function hmacSignatureIsValid(token, hmacAlg)
-  local hmacSecret = nil
-  local issuers = config.issuers
   local hmacSecrets = config.hmacSecrets
-  local issuerIdx = findIdx(issuers, token.payloaddecoded.iss)
-  -- get the hmac secret with the same index
-  if issuerIdx > 0 and issuerIdx <= #hmacSecrets then
-    hmacSecret = hmacSecrets[issuerIdx]
-  end
-
+  local hmacSecret = hmacSecrets[token.payloaddecoded.iss]
+  
   -- if nil, then set to global/default hmac secret
   if hmacSecret == nil then
     hmacSecret = config.hmacSecret
@@ -199,8 +177,7 @@ end
 local function issuerIsValid(token)
   local issuer = config.issuer
   local issuers = config.issuers
-  local issuerIdx = findIdx(issuers, token.payloaddecoded.iss)
-  return issuerIdx > 0 or issuer == nil or token.payloaddecoded.iss == issuer
+  return (issuers ~= nil and contains(issuers, token.payloaddecoded.iss)) or issuer == nil or token.payloaddecoded.iss == issuer
 end
 
 -- Checks if the audience in the token is listed in the
@@ -240,12 +217,9 @@ local function setVariablesFromPayload(txn, decodedPayload)
 end
 
 local function jwtverify(txn)
-  local next = next 
-  local pem = config.publicKey
   local issuer = config.issuer
   local issuers = config.issuers
   local audience = config.audience
-  local hmacSecret = config.hmacSecret
 
   -- 1. Decode and parse the JWT
   local token = decodeJwt(txn.sf:req_hdr("Authorization"))
@@ -289,7 +263,7 @@ local function jwtverify(txn)
   end
 
   -- 5. Verify the issuer
-  if (issuer ~= nil or next(issuers) ~= nil) and issuerIsValid(token) == false then
+  if (issuer ~= nil or issuers ~= nil) and issuerIsValid(token) == false then
     log("Issuer not valid.")
     goto out
   end
@@ -325,24 +299,44 @@ core.register_init(function()
   -- when using an HS256 or HS512 signature
   config.hmacSecret = os.getenv("OAUTH_HMAC_SECRET")
   
-  -- Multiple Issuers w/massociated pubkey and/or secret
-  -- Note that issuers, publickKeys, and hmacScrets should all have the same number of entries
-  -- Decode Issuers to an array
-  local issuers = config.issuers
-  for issuer in os.getenv("OAUTH_ISSUERS"):gmatch("([^,]+)") do 
-    issuers[#issuers + 1] = issuer:gsub("^%s*(.-)%s*$", "%1")
-  end
+  -- Convert OAUTH_ISSUERS environment variable to a table,
+  -- even if it contains only one value
+  local oauthIssuers = os.getenv("OAUTH_ISSUERS")
+  if type(oauthIssuers) == "string" then
+    local next = next
+    local ipairs = ipairs
+    -- split multiple values using a space as the delimiter
+    local issuers = core.tokenize(oauthIssuers, " ")
+    config.issuers = issuers
 
-  -- Decode publicKeys to an array
-  local publicKeys = config.publicKeys
-  for publicKey in os.getenv("OAUTH_PUBKEYS"):gmatch("([^,]+)") do 
-    publicKeys[#publicKeys + 1] = publicKey:gsub("^%s*(.-)%s*$", "%1")
-  end
+    -- Get associated Public Keys and HMAC Secrets
+    local publicKeys = {}
+    local hmacSecrets = {}
+    for index, issuer in ipairs(issuers) do
+      -- Get Public Key by Issuer Index
+      local envVarName = string.format("OAUTH_PUBKEYS[%d]",index)
+      local envVar = os.getenv(envVarName)
+      if type(envVar) == "string" then
+        publicKeys[issuer] = envVar:gsub("^%s*(.-)%s*$", "%1")
+      end
 
-  -- Decode hmacSecrets to an array
-  local hmacSecrets = config.hmacSecrets
-  for hmacSecret in os.getenv("OAUTH_HMAC_SECRETS"):gmatch("([^,]+)") do 
-    hmacSecrets[#hmacSecrets + 1] = hmacSecret:gsub("^%s*(.-)%s*$", "%1")
+      -- Get HMAC Secrete by Issuer Index
+      envVarName = string.format("OAUTH_HMAC_SECRETS[%d]",index)
+      envVar = os.getenv(envVarName)
+      if type(envVar) == "string" then
+        hmacSecrets[issuer] = envVar:gsub("^%s*(.-)%s*$", "%1")
+      end
+    end
+
+    -- save the publicKeys to the configuration only if it is a non-blank table
+    if next(publicKeys) ~= nill then
+      config.publicKeys = publicKeys
+    end
+
+    -- save the hmacSecrets to the configuration only if it is a non-blank table
+    if next(hmacSecrets) ~= nill then
+      config.hmacSecrets = hmacSecrets
+    end
   end
 
   log("PublicKey: " .. (config.publicKey or "<none>"))
