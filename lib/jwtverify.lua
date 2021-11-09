@@ -358,12 +358,12 @@ core.register_init(function()
     end
 
     -- save the publicKeys to the configuration only if it is a non-blank table
-    if next(publicKeys) ~= nill then
+    if next(publicKeys) ~= nil then
       config.publicKeys = publicKeys
     end
 
     -- save the hmacSecrets to the configuration only if it is a non-blank table
-    if next(hmacSecrets) ~= nill then
+    if next(hmacSecrets) ~= nil then
       config.hmacSecrets = hmacSecrets
     end
   end
